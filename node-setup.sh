@@ -4,11 +4,11 @@
 # as the container runtime, and kubeadm, kubelet and kubectl at one pinned
 # version. It does not run kubeadm init or join: that's the lesson.
 #
-# The cluster starts at Kubernetes v1.34, one minor version behind the exam,
+# The cluster starts at Kubernetes v1.36, one minor version behind the exam,
 # so a later lesson can upgrade it for real.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-K8S_MINOR="v1.34"
+K8S_MINOR="v1.36"
 
 echo "== swap off (the kubelet won't start with swap on)"
 swapoff -a

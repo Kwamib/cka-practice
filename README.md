@@ -13,5 +13,5 @@ memory between them.
     vagrant destroy -f    # start over
 
 `node-setup.sh` prepares each machine (swap, kernel modules, containerd,
-kubeadm at v1.34) but leaves creating the cluster to you. That part is the lesson:
+kubeadm at v1.36) but leaves creating the cluster to you. That part is the lesson:
 [A practice cluster: three machines with kubeadm](https://kwamib.dev/resources/cka/a-practice-cluster).
