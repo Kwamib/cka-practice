@@ -4,6 +4,7 @@
 #   ./break.sh list       show the tickets (symptoms only)
 #   ./break.sh 3          break something for ticket 3
 #   ./break.sh undo 3     put ticket 3 back the way it was, if you're stuck
+#                         (for tickets 6 to 10, undo deletes the ticket's namespace)
 #
 # Run it from this folder on your own computer, with the cluster up.
 # Try not to read past this line before you've solved a ticket: on the exam,
@@ -18,6 +19,11 @@ ticket() {
     3) echo "kubectl stopped working on cp1. Get the cluster's API back." ;;
     4) echo "New pods stay Pending forever, on every node. Find out why and fix it." ;;
     5) echo "worker2 is NotReady again, but containerd is running this time. Fix it." ;;
+    6) echo "In namespace t6, the api Deployment never becomes ready. Find out why and fix it without deleting the Deployment." ;;
+    7) echo "In namespace t7, the web Deployment's pods never start. Fix it." ;;
+    8) echo "In namespace t8, the report Deployment's pod stays Pending. Fix it so it runs, without adding nodes." ;;
+    9) echo "In namespace t9, the shop Service gets no traffic, although its pods are Running. Fix the Service." ;;
+    10) echo "In namespace t10, requests to the cart Service fail with connection refused. The pods are fine. Fix it." ;;
     *) return 1 ;;
   esac
 }
@@ -26,7 +32,7 @@ node_for() {
   case "$1" in
     1) echo worker1 ;;
     2|5) echo worker2 ;;
-    3|4) echo cp1 ;;
+    3|4|6|7|8|9|10) echo cp1 ;;
   esac
 }
 
@@ -65,6 +71,106 @@ systemctl daemon-reload
 systemctl restart kubelet || true
 EOS
     ;;
+    6) cat <<'EOS'
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl create ns t6 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -n t6 -f - >/dev/null <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  config.yaml: |
+    port: 8080
+    greeting: hello
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+      - name: api
+        image: busybox:1.37
+        command: ["sh", "-c", "echo loading config; cat /etc/app/config.yaml && sleep 3600"]
+YAML
+EOS
+    ;;
+    7) cat <<'EOS'
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl create ns t7 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl create deploy web -n t7 --image=nginx:1.27-alpien --replicas=2 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+EOS
+    ;;
+    8) cat <<'EOS'
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl create ns t8 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -n t8 -f - >/dev/null <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: report }
+  template:
+    metadata:
+      labels: { app: report }
+    spec:
+      containers:
+      - name: report
+        image: nginx:alpine
+        resources:
+          requests:
+            memory: 4Gi
+            cpu: 100m
+YAML
+EOS
+    ;;
+    9) cat <<'EOS'
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl create ns t9 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl create deploy shop -n t9 --image=nginx:alpine --replicas=2 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -n t9 -f - >/dev/null <<'YAML'
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop
+spec:
+  selector:
+    app: store
+  ports:
+  - port: 80
+    targetPort: 80
+YAML
+EOS
+    ;;
+    10) cat <<'EOS'
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubectl create ns t10 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl create deploy cart -n t10 --image=nginx:alpine --replicas=2 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl apply -n t10 -f - >/dev/null <<'YAML'
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart
+spec:
+  selector:
+    app: cart
+  ports:
+  - port: 80
+    targetPort: 8080
+YAML
+EOS
+    ;;
   esac
 }
 
@@ -75,6 +181,7 @@ undo_cmds() {
     3) echo 'cp /root/.break/kube-apiserver.yaml /etc/kubernetes/manifests/kube-apiserver.yaml' ;;
     4) echo 'cp /root/.break/kube-scheduler.yaml /etc/kubernetes/manifests/kube-scheduler.yaml' ;;
     5) echo 'cp /root/.break/10-kubeadm.conf "$(cat /root/.break/10-kubeadm.path)"; systemctl daemon-reload; systemctl restart kubelet' ;;
+    6|7|8|9|10) echo "KUBECONFIG=/etc/kubernetes/admin.conf kubectl delete ns t$1 --wait=false" ;;
   esac
 }
 
@@ -87,21 +194,21 @@ on_node() {
 
 case "${1:-}" in
   list)
-    for n in 1 2 3 4 5; do echo "Ticket $n: $(ticket $n)"; done
+    for n in 1 2 3 4 5 6 7 8 9 10; do echo "Ticket $n: $(ticket $n)"; done
     ;;
   undo)
-    n=${2:-}; ticket "$n" >/dev/null || { echo "Usage: ./break.sh undo 1-5"; exit 1; }
+    n=${2:-}; ticket "$n" >/dev/null || { echo "Usage: ./break.sh undo 1-10"; exit 1; }
     on_node "$(node_for "$n")" "$(undo_cmds "$n")"
     echo "Ticket $n undone. Give the cluster a minute, then check with: k get nodes; k get pods -n kube-system"
     ;;
-  [1-5])
+  [1-9]|10)
     n=$1
     on_node "$(node_for "$n")" "$(break_cmds "$n")"
     echo "Ticket $n: $(ticket "$n")"
     echo "Symptoms can take up to a minute to show. Start your timer, and work from cp1, as on the exam."
     ;;
   *)
-    echo "Usage: ./break.sh list | 1-5 | undo 1-5"
+    echo "Usage: ./break.sh list | 1-10 | undo 1-10"
     exit 1
     ;;
 esac
